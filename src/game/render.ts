@@ -1,20 +1,33 @@
 /**
- * 杀手数独 —— SVG 渲染
+ * 杀手数独 —— SVG 渲染（任意 N）
+ *
+ * 棋盘尺寸、格距、字号都按题面实际 width/height 计算：
+ * 9×9 保持原来的 52px 格距，12×12 / 16×16 等比缩小以塞进面板。
+ * 同时绘制：宫粗线、虚线笼边界、笼角笼和、预填/填写数字。
  */
 
 import {
   cellAtPoint,
   cellCenter,
+  cellSizeOf,
   originOf,
   regionBoundarySegments,
   squareMetrics,
-  cellSizeOf,
-} from '../core/board'
+} from '../core/board.ts'
 import type { BoardMetrics, GameState, HitTarget, Puzzle, ValidationResult } from '../core/types'
-import { asSudokuPuzzle, asSudokuState, cageIndexMap, type SudokuResult } from './types'
+import { asSudokuPuzzle, asSudokuState, cageIndexMap, symbolOf, type SudokuResult } from './types.ts'
 
-export function metricsFor(): BoardMetrics {
-  return squareMetrics(9, 9, { cell: 52, pad: 20 })
+/** 9×9 的基准像素跨度（与旧版一致的 52×9） */
+const BASE_SPAN = 9 * 52
+
+export function metricsFor(puzzle?: Puzzle): BoardMetrics {
+  const p = puzzle as { width?: number; height?: number } | undefined
+  const w = Math.max(1, Math.min(16, p?.width || 9))
+  const h = Math.max(1, Math.min(16, p?.height || 9))
+  const span = Math.max(w, h)
+  const cell = span <= 9 ? 52 : Math.max(22, Math.min(44, Math.round(BASE_SPAN / span)))
+  const pad = span <= 9 ? 20 : Math.max(10, Math.round(cell * 0.6))
+  return squareMetrics(w, h, { cell, pad })
 }
 
 export function renderBoard(
@@ -25,24 +38,32 @@ export function renderBoard(
   const p = asSudokuPuzzle(puzzle)
   const s = asSudokuState(state)
   const r = result as SudokuResult
-  const m = metricsFor()
+  const n = Math.max(1, Math.min(16, p.width || 9))
+  const m = metricsFor(p)
   const o = originOf(m)
   const { w: cw, h: ch } = cellSizeOf(m)
+  const rows = n
+  const cols = n
+  const span = Math.max(cols, rows)
+  const wide = span > 9
   const bad = new Set(r.badCells ?? [])
   const parts: string[] = []
+  const fontSize = (m.cell * (wide ? 0.6 : 0.52)).toFixed(2)
 
-  parts.push(`<rect class="sd-board-bg" x="${o.x}" y="${o.y}" width="${(cw * 9).toFixed(2)}" height="${(ch * 9).toFixed(2)}" />`)
+  parts.push(
+    `<rect class="sd-board-bg" x="${o.x}" y="${o.y}" width="${(cw * cols).toFixed(2)}" height="${(ch * rows).toFixed(2)}" />`,
+  )
 
-  for (let x = 0; x <= 9; x++) {
+  for (let x = 0; x <= cols; x++) {
     const px = o.x + x * cw
     parts.push(
-      `<line class="sd-grid" x1="${px.toFixed(2)}" y1="${o.y.toFixed(2)}" x2="${px.toFixed(2)}" y2="${(o.y + ch * 9).toFixed(2)}" />`,
+      `<line class="sd-grid" x1="${px.toFixed(2)}" y1="${o.y.toFixed(2)}" x2="${px.toFixed(2)}" y2="${(o.y + ch * rows).toFixed(2)}" />`,
     )
   }
-  for (let y = 0; y <= 9; y++) {
+  for (let y = 0; y <= rows; y++) {
     const py = o.y + y * ch
     parts.push(
-      `<line class="sd-grid" x1="${o.x.toFixed(2)}" y1="${py.toFixed(2)}" x2="${(o.x + cw * 9).toFixed(2)}" y2="${py.toFixed(2)}" />`,
+      `<line class="sd-grid" x1="${o.x.toFixed(2)}" y1="${py.toFixed(2)}" x2="${(o.x + cw * cols).toFixed(2)}" y2="${py.toFixed(2)}" />`,
     )
   }
 
@@ -54,59 +75,71 @@ export function renderBoard(
 
   // 虚线笼边界
   const cages = p.cages ?? []
-  const cageOf = cageIndexMap(cages)
-  for (let i = 0; i < 81; i++) {
-    const x = i % 9
-    const y = (i / 9) | 0
+  const size = n * n
+  const cageOf = cageIndexMap(cages, size)
+  const x1 = (v: number) => v.toFixed(2)
+  for (let i = 0; i < size; i++) {
+    const x = i % n
+    const y = (i / n) | 0
     const x0 = o.x + x * cw
     const y0 = o.y + y * ch
-    if (x === 0 || cageOf[i - 1] !== cageOf[i]) {
-      parts.push(`<line class="sd-cage" x1="${x0.toFixed(2)}" y1="${y0.toFixed(2)}" x2="${x0.toFixed(2)}" y2="${(y0 + ch).toFixed(2)}" />`)
+    const cage = cageOf[i] ?? -1
+    if (x === 0 || (cageOf[i - 1] ?? -2) !== cage) {
+      parts.push(
+        `<line class="sd-cage" x1="${x1(x0)}" y1="${x1(y0)}" x2="${x1(x0)}" y2="${x1(y0 + ch)}" />`,
+      )
     }
-    if (y === 0 || cageOf[i - 9] !== cageOf[i]) {
-      parts.push(`<line class="sd-cage" x1="${x0.toFixed(2)}" y1="${y0.toFixed(2)}" x2="${(x0 + cw).toFixed(2)}" y2="${y0.toFixed(2)}" />`)
+    if (y === 0 || (cageOf[i - n] ?? -2) !== cage) {
+      parts.push(
+        `<line class="sd-cage" x1="${x1(x0)}" y1="${x1(y0)}" x2="${x1(x0 + cw)}" y2="${x1(y0)}" />`,
+      )
     }
-    if (x === 8 || cageOf[i + 1] !== cageOf[i]) {
-      parts.push(`<line class="sd-cage" x1="${(x0 + cw).toFixed(2)}" y1="${y0.toFixed(2)}" x2="${(x0 + cw).toFixed(2)}" y2="${(y0 + ch).toFixed(2)}" />`)
+    if (x === n - 1 || (cageOf[i + 1] ?? -2) !== cage) {
+      parts.push(
+        `<line class="sd-cage" x1="${x1(x0 + cw)}" y1="${x1(y0)}" x2="${x1(x0 + cw)}" y2="${x1(y0 + ch)}" />`,
+      )
     }
-    if (y === 8 || cageOf[i + 9] !== cageOf[i]) {
-      parts.push(`<line class="sd-cage" x1="${x0.toFixed(2)}" y1="${(y0 + ch).toFixed(2)}" x2="${(x0 + cw).toFixed(2)}" y2="${(y0 + ch).toFixed(2)}" />`)
+    if (y === n - 1 || (cageOf[i + n] ?? -2) !== cage) {
+      parts.push(
+        `<line class="sd-cage" x1="${x1(x0)}" y1="${x1(y0 + ch)}" x2="${x1(x0 + cw)}" y2="${x1(y0 + ch)}" />`,
+      )
     }
   }
 
-  // 笼角和标签
+  // 笼角笼和（取笼内最上、最左格）
+  const sumFont = (m.cell * (wide ? 0.19 : 0.22)).toFixed(2)
   for (const cage of cages) {
+    if (!cage.cells.length) continue
     let top = cage.cells[0]!
-    for (const i of cage.cells) {
-      if (i < top) top = i
-    }
-    const x0 = o.x + (top % 9) * cw
-    const y0 = o.y + Math.floor(top / 9) * ch
+    for (const i of cage.cells) if (i < top) top = i
+    const x0 = o.x + (top % n) * cw
+    const y0 = o.y + Math.floor(top / n) * ch
     parts.push(
-      `<text class="sd-cage-sum" x="${(x0 + 2.5).toFixed(2)}" y="${(y0 + m.cell * 0.2).toFixed(2)}" style="font-size:${(m.cell * 0.21).toFixed(2)}px">${cage.sum}</text>`,
+      `<text class="sd-cage-sum" x="${(x0 + 2.5).toFixed(2)}" y="${(y0 + m.cell * 0.2).toFixed(2)}" style="font-size:${sumFont}px">${cage.sum}</text>`,
     )
   }
 
-  for (let i = 0; i < 81; i++) {
+  for (let i = 0; i < size; i++) {
     const v = s.cells[i] ?? 0
     if (v === 0) continue
     const c = cellCenter(m, i)
     const given = (p.givens?.[i] ?? 0) !== 0
     const cls = `sd-value${given ? ' given' : ''}${bad.has(i) ? ' bad' : ''}`
     parts.push(
-      `<text class="${cls}" x="${c.x.toFixed(2)}" y="${(c.y + 2).toFixed(2)}" style="font-size:${(m.cell * 0.52).toFixed(2)}px">${v}</text>`,
+      `<text class="${cls}" x="${c.x.toFixed(2)}" y="${(c.y + 1).toFixed(2)}" style="font-size:${fontSize}px">${symbolOf(v)}</text>`,
     )
   }
 
-  for (let i = 0; i < 81; i++) {
-    const x = o.x + (i % 9) * cw
-    const y = o.y + Math.floor(i / 9) * ch
+  for (let i = 0; i < size; i++) {
+    const x = o.x + (i % n) * cw
+    const y = o.y + Math.floor(i / n) * ch
     parts.push(
       `<rect class="cell-hit" data-index="${i}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${cw.toFixed(2)}" height="${ch.toFixed(2)}" />`,
     )
   }
 
-  return `<svg class="board-svg sd-board" viewBox="0 0 ${m.svgWidth} ${m.svgHeight}" width="${m.svgWidth}" height="${m.svgHeight}" xmlns="http://www.w3.org/2000/svg">${parts.join('')}</svg>`
+  const cls = `board-svg sd-board${wide ? ' sd-wide' : ''}`
+  return `<svg class="${cls}" viewBox="0 0 ${m.svgWidth} ${m.svgHeight}" width="${m.svgWidth}" height="${m.svgHeight}" xmlns="http://www.w3.org/2000/svg">${parts.join('')}</svg>`
 }
 
 export function hitTest(m: BoardMetrics, puzzle: Puzzle, x: number, y: number): HitTarget | null {
