@@ -74,6 +74,22 @@ src/
     puzzles.ts / puzzles-data.ts  题库加载与静态题库
 ```
 
+## 从图片导入题库
+
+```bash
+npm run import-image -- board.png --verify              # 预览识别结果并校验唯一解
+npm run import-image -- board.png --append              # 写入题库（需唯一解）
+npm run import-image -- board.png --size 9 --append     # 指定网格尺寸
+npm run import-image -- board.png --map "3,4=5,5,1=7"   # 人工覆盖误识别的预填数字
+```
+
+说明：
+
+- Playwright + Edge 自动识别网格线、虚线笼界（格线中心像素的明暗翻转）与笼和，并识别预填数字。
+- `--map` 人工覆盖预填数字，坐标 0 基，格式 `x,y=数字`（列,行）；笼和暂不支持人工覆盖，识别异常时请用更大更清晰的截图。
+- `--verify` 调项目 solver 校验唯一解并生成参考解；`--append` 写入 `src/game/puzzles-data.ts`。
+- 当前游戏题库只支持 9×9；`npm run gen` 会重新生成 `puzzles-data.ts` 并覆盖导入的题，重要题面请先另存。
+
 ## 命令
 
 ```bash
