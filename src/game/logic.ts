@@ -6,7 +6,7 @@
  */
 
 import type { GameState, LogicPlan, PlaybackFrame, Puzzle } from '../core/types'
-import { isValidSolution, propagate, type RuleKind } from './rules.ts'
+import { isValidSolution, propagate, type PropagateOptions, type RuleKind } from './rules.ts'
 import {
   asSudokuPuzzle,
   asSudokuState,
@@ -17,11 +17,17 @@ import {
 } from './types.ts'
 
 const RULE_INFO: Record<RuleKind | 'probe' | 'search', { rule: number; label: string }> = {
-  latin: { rule: 1, label: '行/列/宫数字不能重复' },
-  region: { rule: 2, label: '宫内唯一位置' },
+  latin: { rule: 1, label: '行/列/宫数字不能重复（唯一候选）' },
+  region: { rule: 2, label: '单元内唯一位置（隐性唯一）' },
   cage: { rule: 2, label: '虚线笼：数字不重复且和正确' },
-  probe: { rule: 3, label: '反证：其他数字会立刻矛盾' },
-  search: { rule: 4, label: '回溯试探：该格最终是这个数字' },
+  pointing: { rule: 3, label: '宫-行/列交叉：指向消除后落子' },
+  claiming: { rule: 3, label: '行/列-宫交叉：占位消除后落子' },
+  subset: { rule: 3, label: '显性/隐性数对·三数组' },
+  fish: { rule: 3, label: 'X-Wing / Swordfish 鱼形' },
+  wing: { rule: 3, label: 'XY-Wing 三格翼' },
+  sum45: { rule: 3, label: '45 法则 / innies-outies / 笼分割' },
+  probe: { rule: 4, label: '反证：其他数字会立刻矛盾' },
+  search: { rule: 5, label: '回溯试探：该格最终是这个数字' },
 }
 
 function fallbackSolve(
@@ -30,6 +36,7 @@ function fallbackSolve(
   cages: Cage[],
   n: number,
   maxNodes: number,
+  options: PropagateOptions,
 ): number[] | null {
   const size = n * n
   let nodes = 0
@@ -42,7 +49,7 @@ function fallbackSolve(
       timedOut = true
       return null
     }
-    if (!propagate(work, regions, cages, n)) return null
+    if (!propagate(work, regions, cages, n, undefined, options)) return null
     let choice = -1
     for (let i = 0; i < size; i++) {
       if (work[i] === 0) {
@@ -98,7 +105,9 @@ export function planLogicSolve(puzzle: Puzzle, initialState: GameState): LogicPl
   }
   const onSet = (index: number, value: number, kind: RuleKind): void => emit(index, value, kind)
 
-  if (!propagate(grid, regions, cages, n, onSet)) return emptyPlan
+  const options: PropagateOptions = {}
+
+  if (!propagate(grid, regions, cages, n, onSet, options)) return emptyPlan
 
   const deadline = Date.now() + (n > 9 ? 8000 : 60_000)
   const maxRounds = n > 9 ? 32 : 162
@@ -135,7 +144,7 @@ export function planLogicSolve(puzzle: Puzzle, initialState: GameState): LogicPl
       for (let v = 1; v <= n; v++) {
         const trial = grid.slice()
         trial[i] = v
-        if (propagate(trial, regions, cages, n)) feasible.push(v)
+        if (propagate(trial, regions, cages, n, undefined, options)) feasible.push(v)
       }
       if (feasible.length === 0) return emptyPlan
       if (feasible.length === 1) forced.push({ index: i, value: feasible[0]! })
@@ -150,7 +159,7 @@ export function planLogicSolve(puzzle: Puzzle, initialState: GameState): LogicPl
         emit(index, value, 'probe')
       }
     }
-    if (!propagate(grid, regions, cages, n, onSet)) return emptyPlan
+    if (!propagate(grid, regions, cages, n, onSet, options)) return emptyPlan
   }
 
   let stillUnknown = false
@@ -161,7 +170,7 @@ export function planLogicSolve(puzzle: Puzzle, initialState: GameState): LogicPl
     }
   }
   if (stillUnknown) {
-    const found = fallbackSolve(grid, regions, cages, n, n > 9 ? 150_000 : 1_000_000)
+    const found = fallbackSolve(grid, regions, cages, n, n > 9 ? 150_000 : 1_000_000, options)
     if (!found) {
       if (n > 9 && frames.length) {
         const partial: SudokuState = {
